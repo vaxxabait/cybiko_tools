@@ -12,9 +12,17 @@
 #define CYUSB_VID 0x0b66
 #define CYUSB_PID 0x0041
 
+// String descriptor to get CyID
+#define CYUSB_CYID_IDX 0x38
+
+
 // Debug
 #define ERR printf
 #define DBG printf
+
+
+#define CHECK_SUCCESS  {if(status != LIBUSB_SUCCESS) { ERR("CYUSB: libusb call failed at line %0d, status %d\n",__LINE__,status); return CYUSB_ERR; }}
+
 
 
 //////////////////////////////////////////////
@@ -42,17 +50,17 @@ const cyusb_pkt_t CYUSB_PKT_DEFAULT = {
 // Initialize the library
 
 int cyusb_init(cyusb_ctx_t *ctx){
-	int err;
+	int status;
 
 	ctx->usb = NULL;
-	err = libusb_init(&(ctx->usb));
+	
+	status = libusb_init(&(ctx->usb));
+	CHECK_SUCCESS;
 
-	if(err < 0) {
-		ERR("CYUSB: Init Error %d\n",err);
-		return CYUSB_ERR;
-	}
-
-	libusb_set_debug(ctx->usb, 3); //set verbosity level to 3, as suggested in the documentation
+status = libusb_set_option (ctx->usb, LIBUSB_OPTION_LOG_LEVEL,LIBUSB_LOG_LEVEL_WARNING);
+//status = libusb_set_option (ctx->usb, LIBUSB_OPTION_LOG_LEVEL,LIBUSB_LOG_LEVEL_DEBUG);
+	CHECK_SUCCESS;
+	
 	return CYUSB_OK;
 }
 
@@ -65,41 +73,64 @@ int cyusb_find(cyusb_ctx_t *ctx){
 	libusb_device **devs;
 	struct libusb_device_descriptor desc;
 	ssize_t cnt;
-	int err;
+	ssize_t cybiko_cnt;
+	ssize_t bytes;
+	int status;
+	char full_id[CYUSB_CYID_HEXID_LEN+1] = "";
 
-	cnt = libusb_get_device_list(ctx->usb, &devs); //get the list of devices
+	// Get all USB devices
+	cnt = libusb_get_device_list(ctx->usb, &devs);
+	DBG("CYUSB: Found %ld USB devices\n",cnt);
 
-	if(cnt < 0) {
-		ERR("CYUSB: List USB device error\n");
-		return CYUSB_ERR;
-	}
-
+	// Filter Cybiko Xtremes, count them
 	ctx->num = 0;
 	for(int i = 0; i < cnt; i++) {
-		err = libusb_get_device_descriptor(devs[i], &desc);
-		if (err < 0) {
-			ERR("CYUSB: Get USB device descriptor error\n");
-			return CYUSB_ERR;
-		}
+
+		status = libusb_get_device_descriptor(devs[i], &desc);
+		CHECK_SUCCESS;
+
 		if (desc.idVendor == CYUSB_VID && desc.idProduct == CYUSB_PID) {
 			DBG("CYUSB: Found Cybiko Xtreme: ID=%ld\n",ctx->num);
 			ctx->num++;
 		}
 	}
 
+	// Allocate memory for Cybiko Xtremes
 	ctx->dev = malloc(ctx->num * sizeof(cyusb_dev_t));
 
-	cnt = 0;
+	// Again scan all devices for Cybikos
+	cybiko_cnt = 0;
 	for(int i = 0; i < cnt; i++) {
-		err = libusb_get_device_descriptor(devs[i], &desc);
-		if (err < 0) {
-			ERR("CYUSB: Get USB device descriptor error\n");
-			return CYUSB_ERR;
-		}
+
+		status = libusb_get_device_descriptor(devs[i], &desc);
+		CHECK_SUCCESS;
+
 		if (desc.idVendor == CYUSB_VID && desc.idProduct == CYUSB_PID) {
-			ctx->dev[cnt].usb = devs[i];
-			cnt++;
+
+			// Add Cybiko to list
+			ctx->dev[cybiko_cnt].usb = devs[i];
+
+			// Open it
+			status = libusb_open(ctx->dev[cybiko_cnt].usb, &(ctx->dev[cybiko_cnt].handle));
+			CHECK_SUCCESS;
+
+			// Get user CyID
+			bytes = libusb_get_string_descriptor_ascii(ctx->dev[cybiko_cnt].handle, CYUSB_CYID_IDX, full_id,  CYUSB_CYID_HEXID_LEN);
+
+			ctx->dev[cybiko_cnt].CyID = malloc(CYUSB_CYID_LEN);
+
+			// Parse and copy IDs
+			sscanf(full_id, "%lx @%s", &(ctx->dev[cybiko_cnt].HexID), ctx->dev[cybiko_cnt].CyID);
+
+			DBG("CYUSB: Cybiko Xtreme %ld: CyID = @%s, hex ID = %lx\n",cybiko_cnt,ctx->dev[cybiko_cnt].CyID,ctx->dev[cybiko_cnt].HexID);
+
+			// Close Cybiko port
+			libusb_close(ctx->dev[cybiko_cnt].handle);
+
+
+			cybiko_cnt++;
 		} else {
+			// If not Cybiko - remove
 			libusb_unref_device(devs[i]);
 		}
 	}

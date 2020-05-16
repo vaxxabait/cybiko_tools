@@ -16,14 +16,19 @@
 #define CYUSB_OK 0
 #define CYUSB_ERR -1
 
+
+#define CYUSB_CYID_LEN 8
+#define CYUSB_CYID_HEXID_LEN 46
+
 //////////////////////////////////////////////
 // Cybiko device
 
 typedef struct {
-	libusb_device * usb;		// USB device
+	libusb_device * usb;				// USB device
 	libusb_device_handle * handle;	// USB handle
-	char CyID[8];			// Cybiko ID
-	bool ignorecrc;			// Do not check CRC at read
+	char * CyID;						// Cybiko ID
+	uint64_t	HexID;
+	bool ignorecrc;					// Do not check CRC at read
 } cyusb_dev_t;
 
 
@@ -33,7 +38,7 @@ typedef struct {
 
 typedef struct {
 	libusb_context *usb;		// USB library context
-	ssize_t num;			// Number of Cybiko's connected
+	ssize_t num;				// Number of Cybiko's connected
 	cyusb_dev_t *dev;		// USB device list
 } cyusb_ctx_t;
 
